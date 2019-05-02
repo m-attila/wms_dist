@@ -14,7 +14,6 @@ erl_crash.dump
 logs
 _build
 .idea
-sys.config
 rebar3.crashdump
 checkrel_failures.txt
 check_upgrade_failures.txt

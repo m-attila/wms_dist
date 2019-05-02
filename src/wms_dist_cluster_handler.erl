@@ -59,7 +59,8 @@ set_enabled(Node, Enable) ->
   {ok, State :: state()}.
 init(_) ->
   net_kernel:monitor_nodes(true),
-  Nodes = wms_dist:get_cfg_nodes(),
+  Nodes = wms_dist:get_configured_nodes(),
+
   self() ! check_nodes,
 
   {ok, #state{configured_nodes = Nodes,

@@ -5,7 +5,8 @@
   {mod, {wms_dist_app, []}},
   {applications,
    [kernel,
-    stdlib
+    stdlib,
+    wms_cfg
    ]},
   {env,[]},
   {modules, [wms_dist]},

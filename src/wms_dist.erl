@@ -12,40 +12,31 @@
 -include("wms_dist.hrl").
 
 %% API
--export([get_cfg_mode/0,
-         get_cfg_mode_config/0,
-         get_cfg_config/2,
-         get_cfg_nodes/0,
-         get_dst_nodes/1,
-         set_dst_node_enabled/2]).
+-export([get_dst_nodes/1,
+         set_dst_node_enabled/2,
+         get_configured_nodes/0,
+         load_config/1]).
 
 %% =============================================================================
 %% API functions
 %% =============================================================================
 
 %% -----------------------------------------------------------------------------
-%% Config functions
+%% Configuration values
 %% -----------------------------------------------------------------------------
+-spec load_config(boolean()) ->
+  ok.
+load_config(true) ->
+  Path = filename:join(code:priv_dir(?APP_NAME), "wms_dist.config"),
+  ok = wms_cfg:load_config(wms_cfg:get_mode(), [Path]);
+load_config(_) ->
+  ok.
 
--spec get_cfg_mode() ->
-  atom().
-get_cfg_mode() ->
-  env(mode).
 
--spec get_cfg_mode_config() ->
-  term().
-get_cfg_mode_config() ->
-  env(get_cfg_mode()).
-
--spec get_cfg_config(term() | [term()], term()) ->
-  term().
-get_cfg_config(Keys, Default) ->
-  wms_common:get_proplist_value(get_cfg_mode_config(), Keys, Default).
-
--spec get_cfg_nodes() ->
+-spec get_configured_nodes() ->
   [node()].
-get_cfg_nodes() ->
-  get_cfg_config(nodes, undefined).
+get_configured_nodes() ->
+  wms_cfg:get(?APP_NAME, nodes, []).
 
 %% -----------------------------------------------------------------------------
 %% Distribution functions
@@ -60,10 +51,3 @@ get_dst_nodes(Type) ->
   ok.
 set_dst_node_enabled(Node, Enable) ->
   wms_dist_cluster_handler:set_enabled(Node, Enable).
-
-%% =============================================================================
-%% Private functions
-%% =============================================================================
-env(Key) ->
-  {ok, Value} = application:get_env(?APP_NAME, Key),
-  Value.
