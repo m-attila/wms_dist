@@ -1,0 +1,15 @@
+{application, wms_dist,
+ [{description, "Distributed services for WMS system"},
+  {vsn, git},
+  {registered, []},
+  {mod, {wms_dist_app, []}},
+  {applications,
+   [kernel,
+    stdlib
+   ]},
+  {env,[]},
+  {modules, [wms_dist]},
+
+  {licenses, ["Apache 2.0"]},
+  {links, []}
+ ]}.
