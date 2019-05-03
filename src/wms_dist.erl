@@ -15,7 +15,7 @@
 -export([get_dst_nodes/1,
          set_dst_node_enabled/2,
          get_configured_nodes/0,
-         load_config/1]).
+         load_config/0]).
 
 %% =============================================================================
 %% API functions
@@ -24,6 +24,12 @@
 %% -----------------------------------------------------------------------------
 %% Configuration values
 %% -----------------------------------------------------------------------------
+
+-spec load_config() ->
+  ok.
+load_config() ->
+  load_config(wms_cfg:get(?APP_NAME, load_config, true)).
+
 -spec load_config(boolean()) ->
   ok.
 load_config(true) ->
