@@ -38,7 +38,6 @@ load_config(true) ->
 load_config(_) ->
   ok.
 
-
 -spec get_configured_nodes() ->
   [node()].
 get_configured_nodes() ->
