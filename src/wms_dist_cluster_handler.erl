@@ -58,6 +58,7 @@ set_enabled(Node, Enable) ->
 -spec init(Args :: term()) ->
   {ok, State :: state()}.
 init(_) ->
+  syn:init(),
   net_kernel:monitor_nodes(true),
   Nodes = wms_dist:get_configured_nodes(),
 
