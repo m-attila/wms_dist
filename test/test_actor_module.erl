@@ -4,9 +4,17 @@
 %%% @doc
 %%%
 %%% @end
-%%% Created : 01. May 2019 16:32
+%%% Created : 10. May 2019 13:23
 %%%-------------------------------------------------------------------
+-module(test_actor_module).
 -author("Attila Makra").
 
--define(APP_NAME, wms_dist).
--define(ACTOR_CALL_TIMEOUT_MSEC, 10000).
+%% API
+-export([get_node/0,
+         add/2]).
+
+get_node() ->
+  node().
+
+add(X, Y) ->
+  {node(), X + Y}.

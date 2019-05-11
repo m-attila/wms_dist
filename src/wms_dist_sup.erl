@@ -40,7 +40,7 @@ init([]) ->
                 }
                ],
   SupFlags = #{strategy => one_for_one,
-               intensity => 5,
+               intensity => 1,
                period => 1
              },
   {ok, {SupFlags, ChildSpecs}}.
