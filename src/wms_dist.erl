@@ -17,7 +17,10 @@
          get_configured_nodes/0,
          load_config/0,
          call/3,
-         call/4, get_actors/0, is_cluster_connected/0, is_all_node_connected/0]).
+         call/4,
+         get_actors/0,
+         is_cluster_connected/0,
+         is_all_node_connected/0]).
 
 %% =============================================================================
 %% API functions

@@ -39,7 +39,9 @@
 -spec start_link(ActorModule :: atom()) ->
   {ok, pid()} | ignore | {error, {already_started, pid()} | term()}.
 start_link(ActorModule) ->
-  gen_server:start_link(?MODULE, ActorModule, []).
+  Ret = gen_server:start_link(?MODULE, ActorModule, []),
+  ?info("started"),
+  Ret.
 
 -spec forward(pid(), {pid(), term()}, atom(), [term()]) ->
   ok.
@@ -98,8 +100,8 @@ handle_cast({OriginalCaller, Function, Arguments},
       St:C:R ->
         {error, {actor_error, C, R, St}}
     end,
-    gen_server:reply(OriginalCaller, Reply),
-{noreply, State}.
+  gen_server:reply(OriginalCaller, Reply),
+  {noreply, State}.
 
 -spec terminate(Reason :: (normal | shutdown | {shutdown, term()} |
 term()),

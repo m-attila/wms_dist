@@ -61,7 +61,7 @@
   {ok, pid()} | ignore | {error, {already_started, pid()} | term()}.
 start_link() ->
   Ret = gen_server:start_link({local, ?MODULE}, ?MODULE, [], []),
-  ?info("~p started", [?MODULE]),
+  ?info("started"),
   Ret.
 
 %% @doc
@@ -293,25 +293,10 @@ wait_for_cluster_connected(TimeoutMsec) ->
 -spec multi_call_server(term(), pos_integer()) ->
   term().
 multi_call_server(Command, Timeout) ->
-%%  Y = rpc:multicall(wms_dist:get_dst_nodes(connected),
-%%                    erlang,
-%%                    whereis,
-%%                    [?MODULE]),
-%%  ct:pal("******************* DEBUG MESSAGE (~p/~p/~p):~n~p~n", [?MODULE, ?FUNCTION_NAME, ?LINE, {Y}]),
-
-%%  Z = rpc:multicall(wms_dist:get_dst_nodes(connected),
-%%                    application,
-%%                    which_applications,
-%%                    []),
-%%  ct:pal("******************* DEBUG MESSAGE (~p/~p/~p):~n~p~n", [?MODULE, ?FUNCTION_NAME, ?LINE, {Z}]),
-
-%%  ct:pal("******************* DEBUG MESSAGE (~p/~p/~p):~n~p~n", [?MODULE, ?FUNCTION_NAME, ?LINE, {multicall, Command}]),
-  X = rpc:multicall(wms_dist:get_dst_nodes(connected),
-                    ?MODULE,
-                    call_server,
-                    [false, Command], Timeout),
-%%  ct:pal("******************* DEBUG MESSAGE (~p/~p/~p):~n~p~n", [?MODULE, ?FUNCTION_NAME, ?LINE, {X}]),
-  X.
+  rpc:multicall(wms_dist:get_dst_nodes(connected),
+                ?MODULE,
+                call_server,
+                [false, Command], Timeout).
 
 %% @doc
 %%
@@ -526,7 +511,8 @@ handle_call({false, Command}, From, State) ->
 %% Process is_cluster_connected message.
 %% -----------------------------------------------------------------------------
 
-handle_call(is_cluster_connected, _From, #state{cluster_connected = Connected} = State) ->
+handle_call(is_cluster_connected, _From, #state{cluster_connected =
+                                                Connected} = State) ->
   {reply, Connected, State};
 
 %% -----------------------------------------------------------------------------
@@ -667,7 +653,7 @@ check_cluster_connected(#state{cluster_connected     = false,
     false ->
       case wms_common:compare(wms_common:timestamp(), WhenEnd) > 0 of
         true ->
-          ?info("Cluster connected, because connecion timeout expired"),
+          ?info("Cluster connected, because connecion timeout expired."),
           State#state{cluster_connected = true};
         false ->
           State

@@ -391,7 +391,6 @@ actor_test(_Config) ->
   ok = wms_test:start_application([Node2], ?APP_NAME),
   {Node, Result} = wms_dist:call(test_actor_module, add, [1, 2]),
   ?assertEqual(1 + 2, Result),
-  
 
   % enable current
   ?assertEqual(ok, wms_dist_cluster_handler:set_enabled(Current, true)),
