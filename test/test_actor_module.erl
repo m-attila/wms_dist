@@ -10,11 +10,20 @@
 -author("Attila Makra").
 
 %% API
--export([get_node/0,
-         add/2]).
+-export([get_node/1,
+         add/3,
+         init/0,
+         inc/1]).
 
-get_node() ->
-  node().
+init() ->
+  #{counter => 1}.
 
-add(X, Y) ->
-  {node(), X + Y}.
+get_node(State) ->
+  {State, node()}.
+
+add(State, X, Y) ->
+  {State, {node(), X + Y}}.
+
+inc(#{counter := Counter} = State) ->
+  {State#{counter := Counter + 1}, Counter + 1}.
+

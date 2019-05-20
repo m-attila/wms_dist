@@ -27,7 +27,8 @@
 %% State
 %% =============================================================================
 -record(state, {
-  actor_module :: atom()
+  actor_module :: atom(),
+  actors_state :: term()
 }).
 
 -type state() :: #state{}.
@@ -71,7 +72,8 @@ register(ActorModule) ->
     yes ->
       global:sync(),
       ?info("~p module successfull registered on node ~p", [ActorModule, node()]),
-      {ok, #state{actor_module = ActorModule}};
+      {ok, #state{actor_module = ActorModule,
+                  actors_state = init_actor(ActorModule)}};
     _ ->
       ?debug("~ module already registered", [ActorModule]),
       {stop, {error, already_registered}}
@@ -92,16 +94,19 @@ handle_call(_, _From, State) ->
                  ->
                    {noreply, State :: state()}.
 handle_cast({OriginalCaller, Function, Arguments},
-            #state{actor_module = ActorModule} = State) ->
-  Reply =
+            #state{actor_module = ActorModule,
+                   actors_state = ActorState} = State) ->
+  {NewActorState, Reply} =
     try
-      apply(ActorModule, Function, Arguments)
+      apply(ActorModule,
+            Function,
+            [ActorState | Arguments])
     catch
       St:C:R ->
-        {error, {actor_error, C, R, St}}
+        {ActorState, {error, {actor_error, C, R, St}}}
     end,
   gen_server:reply(OriginalCaller, Reply),
-  {noreply, State}.
+  {noreply, State#state{actors_state = NewActorState}}.
 
 -spec terminate(Reason :: (normal | shutdown | {shutdown, term()} |
 term()),
@@ -111,3 +116,14 @@ terminate(Reason, #state{actor_module = ActorModule}) ->
   ?info("~p module terminated with reason ~p on node ~p", [ActorModule,
                                                            Reason, node()]),
   ok.
+
+
+-spec init_actor(atom()) ->
+  term().
+init_actor(ActorModule) ->
+  case lists:member({init, 0}, apply(ActorModule, module_info, [exports])) of
+    true ->
+      apply(ActorModule, init, []);
+    false ->
+      #{}
+  end.

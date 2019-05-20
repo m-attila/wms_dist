@@ -396,6 +396,11 @@ actor_test(_Config) ->
   ?assertEqual(ok, wms_dist_cluster_handler:set_enabled(Current, true)),
   wait_for_all_defined_connstat(2000, true),
 
+  % call actor with state
+  ?assertEqual(2, wms_dist:call(test_actor_module, inc, [])),
+  ?assertEqual(3, wms_dist:call(test_actor_module, inc, [])),
+  ?assertEqual(4, wms_dist:call(test_actor_module, inc, [])),
+
   ok.
 
 %% =============================================================================
