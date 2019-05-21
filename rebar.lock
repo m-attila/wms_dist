@@ -3,7 +3,7 @@
  {<<"lager">>,{pkg,<<"lager">>,<<"3.6.10">>},2},
  {<<"wms_cfg">>,
   {git,"git@github.com:m-attila/wms_cfg.git",
-       {ref,"536d664f591d25e23b7cfece92858dd9c8d9fad6"}},
+       {ref,"eaed82c7f58cb6979e0501fe409c4ad663b9bfd6"}},
   0},
  {<<"wms_common">>,
   {git,"git@github.com:m-attila/wms_common.git",

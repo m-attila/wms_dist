@@ -33,15 +33,7 @@
 -spec load_config() ->
   ok.
 load_config() ->
-  load_config(wms_cfg:get(?APP_NAME, load_config, true)).
-
--spec load_config(boolean()) ->
-  ok.
-load_config(true) ->
-  Path = filename:join(code:priv_dir(?APP_NAME), "wms_dist.config"),
-  ok = wms_cfg:load_config(wms_cfg:get_mode(), [Path]);
-load_config(_) ->
-  ok.
+  ok = wms_cfg:load_app_config([?APP_NAME]).
 
 -spec get_configured_nodes() ->
   [node()].
