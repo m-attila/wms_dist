@@ -38,7 +38,7 @@
 %%%===================================================================
 
 -spec start_link(ActorModule :: atom()) ->
-  {ok, pid()} | ignore | {error, {already_started, pid()} | term()}.
+  {ok, pid()} | ignore | {error, already_registered | term()}.
 start_link(ActorModule) ->
   Ret = gen_server:start_link(?MODULE, ActorModule, []),
   ?info("started"),
@@ -62,7 +62,7 @@ init(ActorModule) ->
       register(ActorModule);
     false ->
       ?debug("~p module already registered", [ActorModule]),
-      {stop, {error, already_registered}}
+      {stop, already_registered}
   end.
 
 -spec register(atom()) ->
@@ -98,15 +98,18 @@ handle_cast({OriginalCaller, Function, Arguments},
                    actors_state = ActorState} = State) ->
   {NewActorState, Reply} =
     try
-      apply(ActorModule,
-            Function,
-            [ActorState | Arguments])
+      call_actor_function(ActorModule, Function, ActorState, Arguments)
     catch
       St:C:R ->
         {ActorState, {error, {actor_error, C, R, St}}}
     end,
   gen_server:reply(OriginalCaller, Reply),
   {noreply, State#state{actors_state = NewActorState}}.
+
+call_actor_function(ActorModule, Function, ActorState, Arguments) ->
+  apply(ActorModule,
+        Function,
+        [ActorState | Arguments]).
 
 -spec terminate(Reason :: (normal | shutdown | {shutdown, term()} |
 term()),

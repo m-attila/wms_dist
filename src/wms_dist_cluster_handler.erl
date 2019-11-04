@@ -44,12 +44,15 @@
 %% =============================================================================
 -type node_status() :: disconnected | connected | down | disabled.
 -type node_info() :: {node_status(), node()}.
+-type auto_start_actors() :: [module()].
+
 -record(state, {
   configured_nodes :: [node()],
   node_states :: [node_info()],
   cluster_connected = false :: boolean(),
   cluster_connected_end :: timestamp(),
-  actor_modules = #{} :: #{pid() := atom(), atom() := pid()}
+  actor_modules = #{} :: #{pid() := atom(), atom() := pid()},
+  auto_start_actors = [] :: auto_start_actors()
 }).
 -type state() :: #state{}.
 
@@ -117,7 +120,7 @@ set_enabled(Node, Enable) ->
 %% call/4
 %% ###### Purpose
 %% Call function on given actor module with arguments.
-%% If actor is registered in cluster, function failed.
+%% If actor is not registered in cluster, function failed.
 %% ###### Arguments
 %%
 %% ###### Returns
@@ -416,6 +419,7 @@ init(_) ->
 
   {ok, #state{configured_nodes      = Nodes,
               cluster_connected_end = wait_for_cluster_expired(),
+              auto_start_actors     = wms_cfg:get(?APP_NAME, auto_start_actors, []),
               node_states           = [{disconnected, Node} || Node <- Nodes]}}.
 
 -spec wait_for_cluster_expired() ->
@@ -466,9 +470,10 @@ handle_info({nodedown, Node}, #state{node_states = NodeStates} = State) ->
          Other
     end, NodeStates),
 
-  {noreply, State#state{node_states           = NewNodeStates,
-                        cluster_connected     = false,
-                        cluster_connected_end = wait_for_cluster_expired()}};
+  NewState = State#state{node_states           = NewNodeStates,
+                                cluster_connected     = false,
+                                cluster_connected_end = wait_for_cluster_expired()},
+  {noreply, auto_start_actors(NewState)};
 
 %% -----------------------------------------------------------------------------
 %% Process reply of asynchron call.
@@ -483,8 +488,7 @@ handle_info({'EXIT', _, {async_reply, CallerPid, Reply}}, State) ->
 %% -----------------------------------------------------------------------------
 
 handle_info({'EXIT', Pid, _}, State) ->
-  ?debug("Actor exited at pid: ~p", [Pid]),
-  {noreply, remove_actor(Pid, State)};
+  {noreply, actor_exited(Pid, State)};
 
 %% -----------------------------------------------------------------------------
 %% Any other messages was received.
@@ -554,12 +558,13 @@ handle_call({set_enabled, Node, Enable}, _From,
             #state{node_states = NodeStates} = State) ->
   ?info("~p node enabled: ~p", [Node, Enable]),
   NewNodeStates = lists:map(
-    fun({_, NodeS}) when Node =:= NodeS andalso not Enable ->
-      {disabled, NodeS};
-       ({disabled, NodeS}) when Node =:= NodeS andalso Enable ->
-         {disconnected, NodeS};
-       (Other) ->
-         Other
+    fun
+      ({_, NodeS}) when Node =:= NodeS andalso not Enable ->
+        {disabled, NodeS};
+      ({disabled, NodeS}) when Node =:= NodeS andalso Enable ->
+        {disconnected, NodeS};
+      (Other) ->
+        Other
     end,
     NodeStates),
   {reply, ok, State#state{node_states = NewNodeStates}};
@@ -649,12 +654,12 @@ check_cluster_connected(#state{cluster_connected     = false,
   case is_all_node_connected(State) of
     true ->
       ?info("Cluster connected, because all node are connected."),
-      State#state{cluster_connected = true};
+      auto_start_actors(State#state{cluster_connected = true});
     false ->
       case wms_common:compare(wms_common:timestamp(), WhenEnd) > 0 of
         true ->
           ?info("Cluster connected, because connecion timeout expired."),
-          State#state{cluster_connected = true};
+          auto_start_actors(State#state{cluster_connected = true});
         false ->
           State
       end
@@ -663,6 +668,56 @@ check_cluster_connected(#state{cluster_connected     = false,
 %% -----------------------------------------------------------------------------
 %% Actor operations
 %% -----------------------------------------------------------------------------
+
+% actor kilepett esemeny kerelese
+-spec actor_exited(pid(), state()) ->
+  state().
+actor_exited(Pid, State) ->
+  ?debug("Actor exited at pid: ~p", [Pid]),
+  case is_auto_start_actor(get_actor_module(Pid, State), State) of
+    true ->
+      auto_start_actors(remove_actor(Pid, State));
+    false ->
+      remove_actor(Pid, State)
+  end.
+
+% megprobalja elinditani az auto startos actorokat
+
+-spec auto_start_actors(state()) ->
+  state().
+auto_start_actors(#state{auto_start_actors = []} = State) ->
+  State;
+auto_start_actors(#state{auto_start_actors = Actors} = State) ->
+  case is_node_connected(State) of
+    true ->
+      do_auto_start_actors(Actors, State);
+    false ->
+      State
+end.
+
+-spec do_auto_start_actors([module()], state()) ->
+  state().
+do_auto_start_actors([], State) ->
+  State;
+do_auto_start_actors([ActorModule | RestActors], State) ->
+  do_auto_start_actors(ActorModule, RestActors,
+                       get_actor_pid(ActorModule, State), State).
+
+-spec do_auto_start_actors(module(), [module()], undefined | pid(), state()) ->
+  state().
+do_auto_start_actors(ActorModule, RestActors, undefined, State) ->
+  NewState =
+    case start_actor_module(ActorModule, true) of
+      {ok, Pid} ->
+        ?info("~s actor started automatically.", [ActorModule]),
+        add_actor(Pid, ActorModule, State);
+      {error, already_registered} ->
+        State
+    end,
+  do_auto_start_actors(RestActors, NewState);
+do_auto_start_actors(_ActorModule, _RestActors, _, State) ->
+  % actor already started locally
+  State.
 
 -spec call_actor(atom(), atom(), [term()], {pid(), term()}, state()) ->
   {noreply, state()} | {reply, term(), state()}.
@@ -696,7 +751,7 @@ call_actor(ActorModule, Function, Arguments, From, State, Pid, EnableStart) ->
   end.
 
 -spec start_actor_module(atom(), EnableStart :: boolean()) ->
-  {ok, pid()} | ignore | error | {error, {already_started, pid()} | term()}.
+  {ok, pid()} | ignore | error | {error, already_registered | term()}.
 start_actor_module(_ActorModule, false) ->
   error;
 start_actor_module(ActorModule, true) ->
@@ -725,6 +780,16 @@ add_actor(ActorPid, ActorModule, #state{actor_modules = ActorModules} = State) -
   pid() | undefined.
 get_actor_pid(ActorModule, #state{actor_modules = ActorModules}) ->
   maps:get(ActorModule, ActorModules, undefined).
+
+-spec get_actor_module(pid(), state()) ->
+  module() | undefined.
+get_actor_module(Pid, #state{actor_modules = ActorModules}) ->
+  maps:get(Pid, ActorModules, undefined).
+
+-spec is_auto_start_actor(module(), state()) ->
+  boolean().
+is_auto_start_actor(ActorModule, #state{auto_start_actors = AutoActors}) ->
+  lists:member(ActorModule, AutoActors).
 
 -spec get_available_actors(state()) ->
   [atom()].
@@ -756,6 +821,16 @@ is_all_defined_node_connected(#state{node_states = NodeStates}) ->
     end,
     NodeStates).
 
+-spec is_node_connected(state()) ->
+  boolean().
+is_node_connected(#state{node_states = NodeStates}) ->
+  lists:any(
+    fun
+      ({connected, Node}) when Node =:= node() ->
+        true;
+      (_) ->
+        false
+    end, NodeStates).
 %% -----------------------------------------------------------------------------
 %% Asynchron calls.
 %% -----------------------------------------------------------------------------

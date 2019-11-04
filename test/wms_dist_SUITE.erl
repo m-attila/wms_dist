@@ -162,6 +162,12 @@ groups() ->
        enable_test,
        actor_test
      ]
+    },
+    {cluster_group_auto,
+     [{repeat_until_any_fail, 1}],
+     [
+       auto_start_test
+     ]
     }
   ].
 
@@ -181,7 +187,8 @@ groups() ->
 %%--------------------------------------------------------------------
 all() ->
   [
-    {group, cluster_group}
+    {group, cluster_group},
+    {group, cluster_group_auto}
   ].
 
 %%--------------------------------------------------------------------
@@ -206,7 +213,7 @@ all() ->
 %%--------------------------------------------------------------------
 
 %% =============================================================================
-%% Table create group
+%% Cluster group
 %% =============================================================================
 
 cluster_group({prelude, Config}) ->
@@ -404,6 +411,85 @@ actor_test(_Config) ->
   ok.
 
 %% =============================================================================
+%% Cluster  group with auto starting module
+%% =============================================================================
+
+cluster_group_auto({prelude, Config}) ->
+  SaveMode = os:getenv("wms_mode"),
+  os:putenv("wms_mode", "multi_test_auto_start"),
+
+  ok = wms_test:start_nodes(?TEST_NODES, [{env, [{"wms_mode",
+                                                  "multi_test_auto_start"}]}]),
+  {ok, StartedApps} = application:ensure_all_started(?APP_NAME),
+  ok = wms_test:start_application(?APP_NAME),
+  [{started, StartedApps}, {save_mode, SaveMode} | Config];
+cluster_group_auto({postlude, Config}) ->
+  StartedApps = ?config(started, Config),
+  [application:stop(App) || App <- StartedApps],
+  ok = wms_test:stop_nodes(?TEST_NODES),
+  wms_test:stop_application(?APP_NAME),
+  os:putenv("wms_mode", ?config(save_mode, Config)),
+  ok.
+
+%%--------------------------------------------------------------------
+%% Auto starting actor module test
+%%
+%%--------------------------------------------------------------------
+
+%% test case information
+auto_start_test({info, _Config}) ->
+  [""];
+auto_start_test(suite) ->
+  ok;
+%% init test case
+auto_start_test({prelude, Config}) ->
+  ?assertEqual(true, wms_dist_cluster_handler:wait_for_cluster_connected()),
+  Config;
+%% destroy test case
+auto_start_test({postlude, _Config}) ->
+  ok;
+%% test case implementation
+auto_start_test(_Config) ->
+  ?assertEqual(true, wms_dist_cluster_handler:is_all_defined_node_connected()),
+
+  % cluster connected, auto start actor started on any node
+  Actors =
+    wms_dist_cluster_handler:multi_get_actors(2000),
+  ?assertEqual(3, length(Actors)),
+
+  NodeForActor = get_actor_node(test_auto_start_actor_module),
+
+  % test actor function
+  Result = wms_dist:call(test_auto_start_actor_module, add,  [1, 3]),
+  ?assertEqual(4, Result),
+
+  {error, _} = wms_dist:call(test_auto_start_actor_module, crash, []),
+
+
+  NodeForActor = get_actor_node(test_auto_start_actor_module),
+
+  % disable node, where test_auto_start_actor_module was started
+  ok = wms_dist_cluster_handler:set_enabled(NodeForActor, false),
+
+  % crash test_auto_start_actor
+  {error, _} = wms_dist:call(test_auto_start_actor_module, crash, []),
+
+  % auto started module not restarted, bacause node is disabled
+  undefined = get_actor_node(test_auto_start_actor_module),
+
+  % set node enabled again
+  ok = wms_dist_cluster_handler:set_enabled(NodeForActor, true),
+
+  % stop t1 node
+  T1 = [?HOST('t1')],
+  wms_test:stop_nodes(T1),
+
+  % wait for to process node down event
+  wms_dist:get_actors(),
+
+  ?assertNotEqual(undefined, get_actor_node(test_auto_start_actor_module)).
+
+%% =============================================================================
 %% Private functions
 %% =============================================================================
 
@@ -429,3 +515,21 @@ wait_for_all_defined_connstat(Timeout, Expected) ->
       wait_for_all_defined_connstat(Timeout - 100, Expected)
   end.
 
+get_actor_node(Actor) ->
+  Actors =
+    wms_dist_cluster_handler:multi_get_actors(2000),
+
+  case lists:filtermap(
+    fun
+      ({_, []}) ->
+        false;
+      ({N, [VActor]}) when Actor =:= VActor ->
+        {true, N};
+      (_) ->
+        false
+    end, Actors) of
+    [NodeForActor] ->
+      NodeForActor;
+    _ ->
+      undefined
+  end.
