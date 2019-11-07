@@ -54,9 +54,16 @@ forward(Pid, From, Function, Arguments) ->
 %% get_server behaviour
 %% =============================================================================
 
--spec init(Args :: term()) ->
+-spec init(ActorModule :: module()) ->
   {ok, State :: state()} | {stop, term()}.
 init(ActorModule) ->
+  init(ActorModule, is_actor_module_exist(ActorModule)).
+
+-spec init(module(), boolean()) ->
+  {ok, State :: state()} | {stop, term()}.
+init(_, false) ->
+  {stop, not_found};
+init(ActorModule, true) ->
   case global:set_lock({ActorModule, self()}, [node() | nodes()], 1) of
     true ->
       register(ActorModule);
@@ -130,3 +137,8 @@ init_actor(ActorModule) ->
     false ->
       #{}
   end.
+
+-spec is_actor_module_exist(module()) ->
+  boolean().
+is_actor_module_exist(ActorModule) ->
+  code:which(ActorModule) =/= non_existing.

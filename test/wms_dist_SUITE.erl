@@ -408,7 +408,33 @@ actor_test(_Config) ->
   ?assertEqual(3, wms_dist:call(test_actor_module, inc, [])),
   ?assertEqual(4, wms_dist:call(test_actor_module, inc, [])),
 
-  ok.
+  % create test_actor_module_x from test_actor_module module
+  ModulePath = code:which(test_actor_module),
+  {ok,
+   {_Module,
+    [{abstract_code,
+      {raw_abstract_v1, AbsForm}}
+    ]
+   }} = beam_lib:chunks(ModulePath, [abstract_code]),
+
+  NewAbsForm =
+    lists:map(
+      fun
+        ({attribute, L, module, test_actor_module}) ->
+          {attribute, L, module, test_actor_module_x};
+        (Other) ->
+          Other
+      end, AbsForm),
+
+
+  {ok, ModName, Binary} = rpc:call(Node, compile, forms,
+                                   [NewAbsForm, [return_errors, debug_info]]),
+  {module, ModName} =
+    % test_actor_module_x is reachable only Node
+    rpc:call(Node, code, load_binary, [ModName, "", Binary]),
+
+  ?assertEqual(Node, wms_dist:call(test_actor_module_x,
+                                   get_node, [])).
 
 %% =============================================================================
 %% Cluster  group with auto starting module
@@ -460,7 +486,7 @@ auto_start_test(_Config) ->
   NodeForActor = get_actor_node(test_auto_start_actor_module),
 
   % test actor function
-  Result = wms_dist:call(test_auto_start_actor_module, add,  [1, 3]),
+  Result = wms_dist:call(test_auto_start_actor_module, add, [1, 3]),
   ?assertEqual(4, Result),
 
   {error, _} = wms_dist:call(test_auto_start_actor_module, crash, []),
