@@ -26,7 +26,7 @@
          wait_for_cluster_connected/1,
          wait_for_cluster_connected/0,
          is_all_node_connected/0,
-         is_all_defined_node_connected/0]).
+         is_all_defined_node_connected/0, subscribe_node_status/1]).
 
 -export([init/1,
          handle_info/2,
@@ -52,7 +52,8 @@
   cluster_connected = false :: boolean(),
   cluster_connected_end :: timestamp(),
   actor_modules = #{} :: #{pid() := atom(), atom() := pid()},
-  auto_start_actors = [] :: auto_start_actors()
+  auto_start_actors = [] :: auto_start_actors(),
+  node_status_listeners = [] :: [pid()]
 }).
 -type state() :: #state{}.
 
@@ -89,6 +90,11 @@ get_nodes(connected) ->
   gen_server:call(?MODULE, {get_nodes, connected});
 get_nodes(all) ->
   gen_server:call(?MODULE, {get_nodes, all}).
+
+-spec subscribe_node_status(pid()) ->
+  ok.
+subscribe_node_status(Pid) ->
+  gen_server:call(?MODULE, {add_node_status_listener, Pid}).
 
 %% @doc
 %%
@@ -453,7 +459,9 @@ handle_info(check_nodes, #state{node_states = NodeStates} = State) ->
 %% nodeup message
 %% -----------------------------------------------------------------------------
 
-handle_info({nodeup, _Node}, State) ->
+handle_info({nodeup, Node}, State) ->
+  advise_listeners(nodeup, Node, State),
+
   self() ! check_nodes,
   {noreply, State};
 
@@ -463,6 +471,8 @@ handle_info({nodeup, _Node}, State) ->
 
 handle_info({nodedown, Node}, #state{node_states = NodeStates} = State) ->
   ?debug("Node down: ~p", [Node]),
+  advise_listeners(nodedown, Node, State),
+
   NewNodeStates = lists:map(
     fun({connected, NodeS}) when NodeS =:= Node ->
       {down, NodeS};
@@ -471,8 +481,8 @@ handle_info({nodedown, Node}, #state{node_states = NodeStates} = State) ->
     end, NodeStates),
 
   NewState = State#state{node_states           = NewNodeStates,
-                                cluster_connected     = false,
-                                cluster_connected_end = wait_for_cluster_expired()},
+                         cluster_connected     = false,
+                         cluster_connected_end = wait_for_cluster_expired()},
   {noreply, auto_start_actors(NewState)};
 
 %% -----------------------------------------------------------------------------
@@ -489,6 +499,14 @@ handle_info({'EXIT', _, {async_reply, CallerPid, Reply}}, State) ->
 
 handle_info({'EXIT', Pid, _}, State) ->
   {noreply, actor_exited(Pid, State)};
+
+%% -----------------------------------------------------------------------------
+%% Subscribed node monitoring process was down
+%% -----------------------------------------------------------------------------
+handle_info({'DOWN', Reference, process, Pid, _Reason},
+            #state{node_status_listeners = Listeners} = State) ->
+  demonitor(Reference),
+  {noreply, State#state{node_status_listeners = lists:delete(Pid, Listeners)}};
 
 %% -----------------------------------------------------------------------------
 %% Any other messages was received.
@@ -582,7 +600,23 @@ handle_call({call, ActorModule, Function, Arguments},
 %% -----------------------------------------------------------------------------
 
 handle_call(get_actors, _From, State) ->
-  {reply, {node(), get_available_actors(State)}, State}.
+  {reply, {node(), get_available_actors(State)}, State};
+
+%% -----------------------------------------------------------------------------
+%% Subscribe for node status changes
+%% -----------------------------------------------------------------------------
+
+handle_call({add_node_status_listener, ListenerPid}, _From,
+            #state{node_status_listeners = Listeners} = State) ->
+  NewState =
+    case lists:member(ListenerPid, Listeners) of
+      true ->
+        State;
+      false ->
+        monitor(process, ListenerPid),
+        State#state{node_status_listeners = [ListenerPid | Listeners]}
+    end,
+  {reply, ok, NewState}.
 
 %% -----------------------------------------------------------------------------
 %% cast message
@@ -693,7 +727,7 @@ auto_start_actors(#state{auto_start_actors = Actors} = State) ->
       do_auto_start_actors(Actors, State);
     false ->
       State
-end.
+  end.
 
 -spec do_auto_start_actors([module()], state()) ->
   state().
@@ -851,3 +885,13 @@ process_async_call(CallerPid, Command) ->
   term().
 execute_call(Command) ->
   gen_server:call(?MODULE, Command).
+
+%% -----------------------------------------------------------------------------
+%% Publish node events
+%% -----------------------------------------------------------------------------
+
+-spec advise_listeners(nodeup | nodedown, node(), state()) ->
+  ok.
+advise_listeners(Event, Node, #state{node_status_listeners = Listeners}) ->
+  [Pid ! {Event, Node} || Pid <- Listeners],
+  ok.

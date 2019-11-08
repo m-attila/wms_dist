@@ -159,6 +159,7 @@ groups() ->
      [{repeat_until_any_fail, 1}],
      [
        connection_test,
+       subscribe_test,
        enable_test,
        actor_test
      ]
@@ -273,6 +274,60 @@ connection_test(_Config) ->
   ?assertEqual(true, wms_dist_cluster_handler:wait_for_cluster_connected()),
   ?assertEqual(true, wms_dist_cluster_handler:is_cluster_connected()),
   ?assertEqual(true, wms_dist_cluster_handler:is_all_node_connected()).
+
+%%--------------------------------------------------------------------
+%% Subscribe for node status tests
+%%
+%%--------------------------------------------------------------------
+
+%% test case information
+subscribe_test({info, _Config}) ->
+  [""];
+subscribe_test(suite) ->
+  ok;
+%% init test case
+subscribe_test({prelude, Config}) ->
+  Config;
+%% destroy test case
+subscribe_test({postlude, _Config}) ->
+  ok;
+%% test case implementation
+subscribe_test(_Config) ->
+  ?assertEqual(true, wms_dist_cluster_handler:wait_for_cluster_connected()),
+
+  Self = self(),
+  Subscriber = spawn(
+    fun F() ->
+      receive
+        exit ->
+          Self ! exited,
+          ok;
+        Other ->
+          Self ! Other,
+          F()
+      end
+    end),
+  ok = wms_dist_cluster_handler:subscribe_node_status(Subscriber),
+
+  % disconnect T1
+  T1 = ?HOST('t1'),
+  wms_test:stop_nodes([T1]),
+  wait_for_message({nodedown, T1}, 1000),
+
+  % connect T1
+  wms_test:start_nodes([T1], [{env, [{"wms_mode", "multi_test"}]}]),
+  wait_for_message({nodeup, T1}, 1000),
+
+  % remove subscriber
+  Subscriber ! exit,
+  wait_for_message(exited, 1000),
+  timer:sleep(500),
+
+  wms_test:stop_nodes([T1]),
+  wms_test:start_nodes([T1], [{env, [{"wms_mode", "multi_test"}]}]),
+  ok = wms_test:start_application([T1], ?APP_NAME),
+  %wait for connected again
+  wait_for_all_connstat(2000, true).
 
 %%--------------------------------------------------------------------
 %% Enable/disable test
@@ -558,4 +613,14 @@ get_actor_node(Actor) ->
       NodeForActor;
     _ ->
       undefined
+  end.
+
+wait_for_message(Message, Timeout) when Timeout =< 0 ->
+  throw({timeout, Message});
+wait_for_message(Message, Timeout) ->
+  receive
+    Message ->
+      ok
+  after 100 ->
+    wait_for_message(Message, Timeout - 100)
   end.

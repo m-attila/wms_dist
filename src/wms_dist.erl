@@ -20,7 +20,7 @@
          call/4,
          get_actors/0,
          is_cluster_connected/0,
-         is_all_node_connected/0]).
+         is_all_node_connected/0, subscribe_node_status/1]).
 
 %% =============================================================================
 %% API functions
@@ -63,6 +63,11 @@ is_cluster_connected() ->
   boolean().
 is_all_node_connected() ->
   wms_dist_cluster_handler:is_all_node_connected().
+
+-spec subscribe_node_status(pid()) ->
+  ok.
+subscribe_node_status(Subscriber) ->
+  wms_dist_cluster_handler:subscribe_node_status(Subscriber).
 
 %% -----------------------------------------------------------------------------
 %% Actor functions
