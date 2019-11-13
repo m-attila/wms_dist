@@ -235,7 +235,7 @@ cluster_group({postlude, Config}) ->
 
 
 %%--------------------------------------------------------------------
-%% Connections tes
+%% Connections test
 %%
 %%--------------------------------------------------------------------
 
@@ -464,32 +464,28 @@ actor_test(_Config) ->
   ?assertEqual(4, wms_dist:call(test_actor_module, inc, [])),
 
   % create test_actor_module_x from test_actor_module module
-  ModulePath = code:which(test_actor_module),
-  {ok,
-   {_Module,
-    [{abstract_code,
-      {raw_abstract_v1, AbsForm}}
-    ]
-   }} = beam_lib:chunks(ModulePath, [abstract_code]),
-
-  NewAbsForm =
-    lists:map(
-      fun
-        ({attribute, L, module, test_actor_module}) ->
-          {attribute, L, module, test_actor_module_x};
-        (Other) ->
-          Other
-      end, AbsForm),
-
-
-  {ok, ModName, Binary} = rpc:call(Node, compile, forms,
-                                   [NewAbsForm, [return_errors, debug_info]]),
-  {module, ModName} =
-    % test_actor_module_x is reachable only Node
-    rpc:call(Node, code, load_binary, [ModName, "", Binary]),
+  create_actor_module_on_node(Node, test_actor_module, test_actor_module_x),
 
   ?assertEqual(Node, wms_dist:call(test_actor_module_x,
-                                   get_node, [])).
+                                   get_node, [])),
+
+  % start optional node (topc)
+  NodeOpc = ?HOST('topc'),
+  ok = wms_test:start_nodes([NodeOpc], [{env, [{"wms_mode", "multi_test"}]}]),
+  ok = wms_test:start_application([NodeOpc], ?APP_NAME),
+
+  wait_for_connected(NodeOpc, 3000),
+
+  create_actor_module_on_node(NodeOpc, test_actor_module, test_actor_module_opc),
+
+  ?assertEqual(NodeOpc, wms_dist:call(test_actor_module_opc,
+                                   get_node, [])),
+  
+  wms_test:stop_application([NodeOpc], ?APP_NAME),
+  ok = wms_test:stop_nodes([NodeOpc]),
+
+  ok.
+
 
 %% =============================================================================
 %% Cluster  group with auto starting module
@@ -624,3 +620,40 @@ wait_for_message(Message, Timeout) ->
   after 100 ->
     wait_for_message(Message, Timeout - 100)
   end.
+
+wait_for_connected(Node, Timeout) when Timeout =< 0 ->
+  throw({not_connected, Node});
+wait_for_connected(Node, Timeout) ->
+  case lists:member(Node, wms_dist:get_dst_opc_nodes(connected)) of
+    true ->
+      ok;
+    false ->
+      timer:sleep(100),
+      wait_for_connected(Node, Timeout - 100)
+  end.
+
+create_actor_module_on_node(Node, FromModule, ToModule) ->
+  % create test_actor_module_x from test_actor_module module
+  ModulePath = code:which(FromModule),
+  {ok,
+   {_Module,
+    [{abstract_code,
+      {raw_abstract_v1, AbsForm}}
+    ]
+   }} = beam_lib:chunks(ModulePath, [abstract_code]),
+
+  NewAbsForm =
+    lists:map(
+      fun
+        ({attribute, L, module, M}) when M =:= FromModule ->
+          {attribute, L, module, ToModule};
+        (Other) ->
+          Other
+      end, AbsForm),
+
+
+  {ok, ModName, Binary} = rpc:call(Node, compile, forms,
+                                   [NewAbsForm, [return_errors, debug_info]]),
+  {module, ModName} =
+    % test_actor_module_x is reachable only Node
+    rpc:call(Node, code, load_binary, [ModName, "", Binary]).

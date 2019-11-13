@@ -17,6 +17,7 @@
 %% API
 -export([start_link/0,
          get_nodes/1,
+         get_opc_nodes/1,
          set_enabled/2,
          call/3,
          multi_call/4,
@@ -48,7 +49,9 @@
 
 -record(state, {
   configured_nodes :: [node()],
+  configured_nodes_opc :: [node()],
   node_states :: [node_info()],
+  node_states_opc :: [node_info()],
   cluster_connected = false :: boolean(),
   cluster_connected_end :: timestamp(),
   actor_modules = #{} :: #{pid() := atom(), atom() := pid()},
@@ -90,6 +93,29 @@ get_nodes(connected) ->
   gen_server:call(?MODULE, {get_nodes, connected});
 get_nodes(all) ->
   gen_server:call(?MODULE, {get_nodes, all}).
+
+%% @doc
+%%
+%%-------------------------------------------------------------------
+%%
+%% ### Function
+%% get_opc_nodes/1
+%% ###### Purpose
+%% Returns all defined or connected optional nodes
+%% ###### Arguments
+%%
+%% ###### Returns
+%%
+%%-------------------------------------------------------------------
+%%
+%% @end
+
+-spec get_opc_nodes(connected | all) ->
+  [node()].
+get_opc_nodes(connected) ->
+  gen_server:call(?MODULE, {get_opc_nodes, connected});
+get_opc_nodes(all) ->
+  gen_server:call(?MODULE, {get_opc_nodes, all}).
 
 -spec subscribe_node_status(pid()) ->
   ok.
@@ -302,7 +328,8 @@ wait_for_cluster_connected(TimeoutMsec) ->
 -spec multi_call_server(term(), pos_integer()) ->
   term().
 multi_call_server(Command, Timeout) ->
-  rpc:multicall(wms_dist:get_dst_nodes(connected),
+  rpc:multicall(wms_dist:get_dst_nodes(connected) ++
+                  wms_dist:get_dst_opc_nodes(connected),
                 ?MODULE,
                 call_server,
                 [false, Command], Timeout).
@@ -419,14 +446,17 @@ init(_) ->
 
   net_kernel:monitor_nodes(true),
   Nodes = wms_dist:get_configured_nodes(),
+  OpcNodes = wms_dist:get_configured_opc_nodes(),
 
   self() ! check_nodes,
 
 
   {ok, #state{configured_nodes      = Nodes,
+              configured_nodes_opc  = OpcNodes,
               cluster_connected_end = wait_for_cluster_expired(),
               auto_start_actors     = wms_cfg:get(?APP_NAME, auto_start_actors, []),
-              node_states           = [{disconnected, Node} || Node <- Nodes]}}.
+              node_states           = [{disconnected, Node} || Node <- Nodes],
+              node_states_opc       = [{disconnected, Node} || Node <- OpcNodes]}}.
 
 -spec wait_for_cluster_expired() ->
   timestamp().
@@ -444,14 +474,18 @@ wait_for_cluster_expired() ->
 %% check nodes message
 %% -----------------------------------------------------------------------------
 
-handle_info(check_nodes, #state{node_states = NodeStates} = State) ->
+handle_info(check_nodes, #state{node_states     = NodeStates,
+                                node_states_opc = NodeStatesOpc} = State) ->
   Delay = wms_cfg:get(?APP_NAME,
                       inactive_node_checking_timeout,
                       ?INACTIVE_NODE_CHECKING_TIMEOUT),
   erlang:send_after(Delay, self(), check_nodes),
 
-  NewNodeStates = handle_nodes(NodeStates, []),
-  NewState = check_cluster_connected(State#state{node_states = NewNodeStates}),
+  NewNodeStates = handle_nodes(NodeStates, [], true),
+  NewNodeStatesOpc = handle_nodes(NodeStatesOpc, [], false),
+  NewState = check_cluster_connected(
+    State#state{node_states     = NewNodeStates,
+                node_states_opc = NewNodeStatesOpc}),
 
   {noreply, NewState};
 
@@ -469,7 +503,10 @@ handle_info({nodeup, Node}, State) ->
 %% nodedown message
 %% -----------------------------------------------------------------------------
 
-handle_info({nodedown, Node}, #state{node_states = NodeStates} = State) ->
+handle_info({nodedown, Node}, #state{node_states           = NodeStates,
+                                     node_states_opc       = NodeStatesOpc,
+                                     cluster_connected     = ClusterConnected,
+                                     cluster_connected_end = ClusterConnectedEnd} = State) ->
   ?debug("Node down: ~p", [Node]),
   advise_listeners(nodedown, Node, State),
 
@@ -480,9 +517,26 @@ handle_info({nodedown, Node}, #state{node_states = NodeStates} = State) ->
          Other
     end, NodeStates),
 
+  NewNodeStatesOpc = lists:map(
+    fun({connected, NodeS}) when NodeS =:= Node ->
+      {down, NodeS};
+       (Other) ->
+         Other
+    end, NodeStatesOpc),
+
+  {NewClusterConnected, NewClusterConnectedEnd}
+    = case NodeStates of
+        NewNodeStates ->
+          % optional nodes changed only
+          {ClusterConnected, ClusterConnectedEnd};
+        _ ->
+          {false, wait_for_cluster_expired()}
+      end,
+
   NewState = State#state{node_states           = NewNodeStates,
-                         cluster_connected     = false,
-                         cluster_connected_end = wait_for_cluster_expired()},
+                         node_states_opc       = NewNodeStatesOpc,
+                         cluster_connected     = NewClusterConnected,
+                         cluster_connected_end = NewClusterConnectedEnd},
   {noreply, auto_start_actors(NewState)};
 
 %% -----------------------------------------------------------------------------
@@ -557,15 +611,18 @@ handle_call(is_all_defined_node_connected, _From, State) ->
 
 handle_call({get_nodes, connected}, _From,
             #state{node_states = NodeStates} = State) ->
-  {reply,
-    lists:filtermap(
-      fun({connected, Node}) ->
-        {true, Node};
-         (_) ->
-           false
-      end, NodeStates), State};
+  {reply, filter_connected(NodeStates), State};
+
+handle_call({get_opc_nodes, connected}, _From,
+            #state{node_states_opc = NodeStates} = State) ->
+  {reply, filter_connected(NodeStates), State};
+
 handle_call({get_nodes, all}, _From,
             #state{configured_nodes = Nodes} = State) ->
+  {reply, Nodes, State};
+
+handle_call({get_opc_nodes, all}, _From,
+            #state{configured_nodes_opc = Nodes} = State) ->
   {reply, Nodes, State};
 
 %% -----------------------------------------------------------------------------
@@ -635,39 +692,44 @@ handle_cast(_, State) ->
 %% Node operations
 %% -----------------------------------------------------------------------------
 
--spec handle_nodes([node_info()], [node_info()]) ->
+-spec handle_nodes([node_info()], [node_info()], boolean()) ->
   [node_info()].
-handle_nodes([], Accu) ->
+handle_nodes([], Accu, _) ->
   Accu;
-handle_nodes([{disconnected, Node} | Rest], Accu) ->
-  handle_nodes(Rest, [{connect_node(Node), Node} | Accu]);
-handle_nodes([{connected, _} = Connected | Rest], Accu) ->
-  handle_nodes(Rest, [Connected | Accu]);
-handle_nodes([{down, Node} | Rest], Accu) ->
-  handle_nodes(Rest, [{ping_node(Node), Node} | Accu]);
-handle_nodes([Disabled | Rest], Accu) ->
-  handle_nodes(Rest, [Disabled | Accu]).
+handle_nodes([{disconnected, Node} | Rest], Accu, Log) ->
+  handle_nodes(Rest, [{connect_node(Node, Log), Node} | Accu], Log);
+handle_nodes([{connected, _} = Connected | Rest], Accu, Log) ->
+  handle_nodes(Rest, [Connected | Accu], Log);
+handle_nodes([{down, Node} | Rest], Accu, Log) ->
+  handle_nodes(Rest, [{ping_node(Node), Node} | Accu], Log);
+handle_nodes([Disabled | Rest], Accu, Log) ->
+  handle_nodes(Rest, [Disabled | Accu], Log).
 
--spec connect_node(node()) ->
+-spec connect_node(node(), boolean()) ->
   connected | disconnected.
-connect_node(Node) ->
-  connect_node(Node, node()).
+connect_node(Node, Log) ->
+  connect_node(Node, node(), Log).
 
--spec connect_node(node(), node()) ->
+-spec connect_node(node(), node(), boolean()) ->
   connected | disconnected.
-connect_node(Node, Node) ->
+connect_node(Node, Node, _) ->
   connected;
-connect_node(Node, _) ->
+connect_node(Node, _, Log) ->
   case net_kernel:connect_node(Node) of
     true ->
       connected;
     false ->
-      ?debug("Unable to connect node: ~p", [Node]),
+      unable_to_connect(Log, Node),
       disconnected;
     ignored ->
-      ?debug("Unable to connect node: ~p", [Node]),
+      unable_to_connect(Log, Node),
       disconnected
   end.
+
+unable_to_connect(false, _) ->
+  ok;
+unable_to_connect(true, Node) ->
+  ?debug("Unable to connect node: ~p", [Node]).
 
 -spec ping_node(node()) ->
   connected | down.
@@ -698,6 +760,16 @@ check_cluster_connected(#state{cluster_connected     = false,
           State
       end
   end.
+
+-spec filter_connected([node()]) ->
+  [node()].
+filter_connected(NodeStates) ->
+  lists:filtermap(
+    fun({connected, Node}) ->
+      {true, Node};
+       (_) ->
+         false
+    end, NodeStates).
 
 %% -----------------------------------------------------------------------------
 %% Actor operations

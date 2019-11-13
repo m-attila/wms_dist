@@ -13,6 +13,7 @@
 
 %% API
 -export([get_dst_nodes/1,
+         get_dst_opc_nodes/1,
          set_dst_node_enabled/2,
          get_configured_nodes/0,
          load_config/0,
@@ -20,7 +21,9 @@
          call/4,
          get_actors/0,
          is_cluster_connected/0,
-         is_all_node_connected/0, subscribe_node_status/1]).
+         is_all_node_connected/0,
+         subscribe_node_status/1,
+         get_configured_opc_nodes/0]).
 
 %% =============================================================================
 %% API functions
@@ -40,6 +43,11 @@ load_config() ->
 get_configured_nodes() ->
   wms_cfg:get(?APP_NAME, nodes, []).
 
+-spec get_configured_opc_nodes() ->
+  [node()].
+get_configured_opc_nodes() ->
+  wms_cfg:get(?APP_NAME, optional_nodes, []).
+
 %% -----------------------------------------------------------------------------
 %% Distribution functions
 %% -----------------------------------------------------------------------------
@@ -48,6 +56,11 @@ get_configured_nodes() ->
   [node()].
 get_dst_nodes(Type) ->
   wms_dist_cluster_handler:get_nodes(Type).
+
+-spec get_dst_opc_nodes(all | connected) ->
+  [node()].
+get_dst_opc_nodes(Type) ->
+  wms_dist_cluster_handler:get_opc_nodes(Type).
 
 -spec set_dst_node_enabled(node(), boolean()) ->
   ok.
