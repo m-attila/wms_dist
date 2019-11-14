@@ -480,7 +480,6 @@ actor_test(_Config) ->
 
   ?assertEqual(NodeOpc, wms_dist:call(test_actor_module_opc,
                                    get_node, [])),
-  
   wms_test:stop_application([NodeOpc], ?APP_NAME),
   ok = wms_test:stop_nodes([NodeOpc]),
 

@@ -503,10 +503,11 @@ handle_info({nodeup, Node}, State) ->
 %% nodedown message
 %% -----------------------------------------------------------------------------
 
-handle_info({nodedown, Node}, #state{node_states           = NodeStates,
-                                     node_states_opc       = NodeStatesOpc,
-                                     cluster_connected     = ClusterConnected,
-                                     cluster_connected_end = ClusterConnectedEnd} = State) ->
+handle_info({nodedown, Node},
+            #state{node_states           = NodeStates,
+                   node_states_opc       = NodeStatesOpc,
+                   cluster_connected     = ClusterConnected,
+                   cluster_connected_end = ClusterConnectedEnd} = State) ->
   ?debug("Node down: ~p", [Node]),
   advise_listeners(nodedown, Node, State),
 
