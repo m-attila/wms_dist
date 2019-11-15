@@ -930,14 +930,15 @@ is_all_defined_node_connected(#state{node_states = NodeStates}) ->
 
 -spec is_node_connected(state()) ->
   boolean().
-is_node_connected(#state{node_states = NodeStates}) ->
+is_node_connected(#state{node_states     = NodeStates,
+                         node_states_opc = NodeStatesOpc}) ->
   lists:any(
     fun
       ({connected, Node}) when Node =:= node() ->
         true;
       (_) ->
         false
-    end, NodeStates).
+    end, NodeStates ++ NodeStatesOpc).
 %% -----------------------------------------------------------------------------
 %% Asynchron calls.
 %% -----------------------------------------------------------------------------
