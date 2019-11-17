@@ -108,6 +108,8 @@ handle_cast({OriginalCaller, Function, Arguments},
       call_actor_function(ActorModule, Function, ActorState, Arguments)
     catch
       St:C:R ->
+        ?error("DIS-0001", "Actor function call was failed: ~s ~s ~0p",
+               [ActorModule, Function, R]),
         {ActorState, {error, {actor_error, C, R, St}}}
     end,
   gen_server:reply(OriginalCaller, Reply),

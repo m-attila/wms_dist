@@ -494,6 +494,7 @@ handle_info(check_nodes, #state{node_states     = NodeStates,
 %% -----------------------------------------------------------------------------
 
 handle_info({nodeup, Node}, State) ->
+  ?info("Node up: ~s", [Node]),
   advise_listeners(nodeup, Node, State),
 
   self() ! check_nodes,
@@ -508,7 +509,7 @@ handle_info({nodedown, Node},
                    node_states_opc       = NodeStatesOpc,
                    cluster_connected     = ClusterConnected,
                    cluster_connected_end = ClusterConnectedEnd} = State) ->
-  ?debug("Node down: ~p", [Node]),
+  ?info("Node down: ~s", [Node]),
   advise_listeners(nodedown, Node, State),
 
   NewNodeStates = lists:map(
